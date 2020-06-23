@@ -1,0 +1,381 @@
+//Libraries
+#include <DHT.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <SoftwareSerial.h>
+#define RX 2
+#define TX 3
+/************************MQ135sensor************************************/
+/************************Hardware Related Macros************************************/
+#define         MQ135PIN                       (0)     //define which analog input channel you are going to use
+#define         RL_VALUE_MQ135                 (1)     //define the load resistance on the board, in kilo ohms
+#define         RO_CLEAN_AIR_FACTOR_MQ135      (3.59)  //RO_CLEAR_AIR_FACTOR=(Sensor resistance in clean air)/RO,
+                                                       //which is derived from the chart in datasheet
+
+/***********************Software Related Macros************************************/
+#define         CALIBARAION_SAMPLE_TIMES     (50)    //define how many samples you are going to take in the calibration phase
+#define         CALIBRATION_SAMPLE_INTERVAL  (500)   //define the time interal(in milisecond) between each samples in the
+                                                     //cablibration phase
+#define         READ_SAMPLE_INTERVAL         (50)    //define how many samples you are going to take in normal operation
+#define         READ_SAMPLE_TIMES            (5)     //define the time interal(in milisecond) between each samples in 
+                                                     //normal operation
+
+/**********************Application Related Macros**********************************/
+#define         GAS_CARBON_DIOXIDE           (9)
+#define         GAS_CARBON_MONOXIDE          (3)
+#define         GAS_ALCOHOL                  (4)
+#define         GAS_AMMONIUM                 (10)
+#define         GAS_TOLUENE                  (11)
+#define         GAS_ACETONE                  (12)
+//#define         accuracy                     (0)   //for linearcurves
+#define         accuracy                   (1)   //for nonlinearcurves, un comment this line and comment the above line if calculations 
+                                                   //are to be done using non linear curve equations
+/*****************************Globals***********************************************/
+
+//Constants
+#define DHTPIN 7     // Define input pin 7
+#define DHTTYPE DHT22   // DHT 22  (AM2302)
+DHT dht(DHTPIN, DHTTYPE); // Initialize DHT sensor for normal 16mhz Arduino
+LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE); //LCD screen configuration
+SoftwareSerial esp8266(RX,TX); //Initialize ESP8266 using RX & TX
+
+//Variables
+int chk;
+float hum;  //Stores humidity value
+float temp; //Stores temperature value
+float carbDio; //Stores carbon dioxide value
+float carbMono; //Stores carbon monoxide value
+float alco; //stores alcohol value
+float ammon; //stores ammonium value
+float tolu; //stores toluene value
+float acet; //stores acetone value
+float Ro = 10;//Ro is initialized to 10 kilo ohms
+
+String AP = "QuickSpruceGoogle"; //Wifi SSID
+String PASS = "1a2b3c4d5e"; //Wifi Password
+String API = "KDO5FO5M3PDP0VQO"; //Thingspeak API key for channel
+String HOST = "api.thingspeak.com"; //Thingspeak API address
+String PORT = "80"; //Communication port
+String field = "field1";
+String field2 = "field2";
+int countTrueCommand;
+int countTimeCommand; 
+boolean found = false; 
+int valSensor = 1;
+
+void setup() {
+  Serial.begin(9600); //UART setup, baudrate = 9600bps
+
+  esp8266.begin(115200);
+  sendCommand("AT",5,"OK");
+  sendCommand("AT+CWMODE=1",5,"OK");
+  sendCommand("AT+CWJAP=\""+ AP +"\",\""+ PASS +"\"",20,"OK");
+  
+  Serial.print("Calibrating...\n");                
+  Ro = MQCalibration(MQ135PIN); //Calibrating the sensor 
+                                                                       
+  Serial.print("Calibration is done...\n"); 
+  Serial.print("Ro=");
+  Serial.print(Ro);
+  Serial.print("kohm");
+  Serial.print("\n");
+
+  // Initialize DHT Temperature sensor and LCD monitor, clear screen
+  dht.begin(); 
+  lcd.begin(16,2); 
+  lcd.clear(); 
+}
+
+void loop() {
+   //Read data and store it to variables hum and temp
+   hum = dht.readHumidity();
+   temp = dht.readTemperature();
+   
+   valSensor = getSensorData(); //Call function to pull sensor data
+   String getData = "GET /update?api_key="+ API +"&"+ "field1" +"="+String(valSensor); //Create string data
+   sendCommand("AT+CIPMUX=1",5,"OK");
+   sendCommand("AT+CIPSTART=0,\"TCP\",\""+ HOST +"\","+ PORT,15,"OK");
+   sendCommand("AT+CIPSEND=0," +String(getData.length()+4),4,">");
+   esp8266.println(getData);delay(1500);countTrueCommand++;
+   sendCommand("AT+CIPCLOSE=0",5,"OK");
+
+   valSensor = getSensorData2(); //Call function to pull sensor data
+   getData = "GET /update?api_key="+ API +"&"+ "field2" +"="+String(valSensor); //Create string data
+   sendCommand("AT+CIPMUX=1",5,"OK");
+   sendCommand("AT+CIPSTART=0,\"TCP\",\""+ HOST +"\","+ PORT,15,"OK");
+   sendCommand("AT+CIPSEND=0," +String(getData.length()+4),4,">");
+   esp8266.println(getData);delay(1500);countTrueCommand++;
+   sendCommand("AT+CIPCLOSE=0",5,"OK");
+
+   valSensor = getSensorData3(); //Call function to pull sensor data
+   getData = "GET /update?api_key="+ API +"&"+ "field3" +"="+String(valSensor); //Create string data
+   sendCommand("AT+CIPMUX=1",5,"OK");
+   sendCommand("AT+CIPSTART=0,\"TCP\",\""+ HOST +"\","+ PORT,15,"OK");
+   sendCommand("AT+CIPSEND=0," +String(getData.length()+4),4,">");
+   esp8266.println(getData);delay(1500);countTrueCommand++;
+   sendCommand("AT+CIPCLOSE=0",5,"OK");
+     
+   valSensor = getSensorData4(); //Call function to pull sensor data
+   getData = "GET /update?api_key="+ API +"&"+ "field4" +"="+String(valSensor); //Create string data
+   sendCommand("AT+CIPMUX=1",5,"OK");
+   sendCommand("AT+CIPSTART=0,\"TCP\",\""+ HOST +"\","+ PORT,15,"OK");
+   sendCommand("AT+CIPSEND=0," +String(getData.length()+4),4,">");
+   esp8266.println(getData);delay(1500);countTrueCommand++;
+   sendCommand("AT+CIPCLOSE=0",5,"OK");
+
+   valSensor = getSensorData5(); //Call function to pull sensor data
+   getData = "GET /update?api_key="+ API +"&"+ "field5" +"="+String(valSensor); //Create string data
+   sendCommand("AT+CIPMUX=1",5,"OK");
+   sendCommand("AT+CIPSTART=0,\"TCP\",\""+ HOST +"\","+ PORT,15,"OK");
+   sendCommand("AT+CIPSEND=0," +String(getData.length()+4),4,">");
+   esp8266.println(getData);delay(1500);countTrueCommand++;
+   sendCommand("AT+CIPCLOSE=0",5,"OK");
+
+   valSensor = getSensorData6(); //Call function to pull sensor data
+   getData = "GET /update?api_key="+ API +"&"+ "field6" +"="+String(valSensor); //Create string data
+   sendCommand("AT+CIPMUX=1",5,"OK");
+   sendCommand("AT+CIPSTART=0,\"TCP\",\""+ HOST +"\","+ PORT,15,"OK");
+   sendCommand("AT+CIPSEND=0," +String(getData.length()+4),4,">");
+   esp8266.println(getData);delay(1500);countTrueCommand++;
+   sendCommand("AT+CIPCLOSE=0",5,"OK");
+
+   valSensor = getSensorData7(); //Call function to pull sensor data
+   getData = "GET /update?api_key="+ API +"&"+ "field7" +"="+String(valSensor); //Create string data
+   sendCommand("AT+CIPMUX=1",5,"OK");
+   sendCommand("AT+CIPSTART=0,\"TCP\",\""+ HOST +"\","+ PORT,15,"OK");
+   sendCommand("AT+CIPSEND=0," +String(getData.length()+4),4,">");
+   esp8266.println(getData);delay(1500);countTrueCommand++;
+   sendCommand("AT+CIPCLOSE=0",5,"OK");
+
+   valSensor = getSensorData8(); //Call function to pull sensor data
+   getData = "GET /update?api_key="+ API +"&"+ "field8" +"="+String(valSensor); //Create string data
+   sendCommand("AT+CIPMUX=1",5,"OK");
+   sendCommand("AT+CIPSTART=0,\"TCP\",\""+ HOST +"\","+ PORT,15,"OK");
+   sendCommand("AT+CIPSEND=0," +String(getData.length()+4),4,">");
+   esp8266.println(getData);delay(1500);countTrueCommand++;
+   sendCommand("AT+CIPCLOSE=0",5,"OK");
+
+   Serial.print("CARBON_DIOXIDE:"); 
+   Serial.print(MQGetGasPercentage(MQRead(MQ135PIN)/Ro,GAS_CARBON_DIOXIDE) );
+   Serial.print( "ppm" );
+   Serial.print("    ");
+   carbDio = MQGetGasPercentage(MQRead(MQ135PIN)/Ro,GAS_CARBON_DIOXIDE);   
+   Serial.print("CARBON_MONOXIDE:"); 
+   Serial.print(MQGetGasPercentage(MQRead(MQ135PIN)/Ro,GAS_CARBON_MONOXIDE) );
+   Serial.print( "ppm" );
+   Serial.print("    ");
+   carbMono = MQGetGasPercentage(MQRead(MQ135PIN)/Ro,GAS_CARBON_MONOXIDE);   
+   Serial.print("ALCOHOL:"); 
+   Serial.print(MQGetGasPercentage(MQRead(MQ135PIN)/Ro,GAS_ALCOHOL) );
+   Serial.print( "ppm" );
+   Serial.print("    ");
+   alco = MQGetGasPercentage(MQRead(MQ135PIN)/Ro,GAS_ALCOHOL);   
+   Serial.print("AMMONIUM:"); 
+   Serial.print(MQGetGasPercentage(MQRead(MQ135PIN)/Ro,GAS_AMMONIUM) );
+   Serial.print( "ppm" );
+   Serial.print("    ");
+   ammon = MQGetGasPercentage(MQRead(MQ135PIN)/Ro,GAS_AMMONIUM);   
+   Serial.print("TOLUENE:"); 
+   Serial.print(MQGetGasPercentage(MQRead(MQ135PIN)/Ro,GAS_TOLUENE) );
+   Serial.print( "ppm" );
+   Serial.print("    ");
+   tolu = MQGetGasPercentage(MQRead(MQ135PIN)/Ro,GAS_TOLUENE);   
+   Serial.print("ACETONE:"); 
+   Serial.print(MQGetGasPercentage(MQRead(MQ135PIN)/Ro,GAS_ACETONE) );
+   Serial.print( "ppm" );
+   Serial.print("\n");
+   acet = MQGetGasPercentage(MQRead(MQ135PIN)/Ro,GAS_ACETONE);
+   delay(200);
+
+    byte col = 0; //Set single byte col variable
+    delay(2000); //Delay two seconds
+    
+    //Print temp and humidity values to serial monitor
+    Serial.print("Humidity: ");
+    Serial.print(hum);
+    Serial.print(" %, Temp: ");
+    Serial.print(temp);
+    Serial.println(" Celsius");
+
+    //Print temp and humidity values to LCD monitor
+    lcd.print("Temp: ");
+    lcd.print(temp);
+    lcd.setCursor(col, 1); // Adjust LCD column
+    col++; // Increment col
+    col = col % 2; // Set col to 0/1
+    lcd.print("Humidity: ");
+    lcd.print(hum);
+    lcd.setCursor(col, 1); // Adjust LCD column
+    
+    delay(10000); //Delay 2 sec.
+}
+
+int getSensorData(){
+  return temp;
+}
+
+int getSensorData2(){
+  return hum;
+}
+
+int getSensorData3(){
+  return carbDio;
+}
+
+int getSensorData4(){
+  return carbMono;
+}
+
+int getSensorData5(){
+  return alco;
+}
+
+int getSensorData6(){
+  return ammon;
+}
+
+int getSensorData7(){
+  return tolu;
+}
+
+int getSensorData8(){
+  return acet;
+}
+
+//Function for printing data
+void sendCommand(String command, int maxTime, char readReplay[]) {
+  Serial.print(countTrueCommand);
+  Serial.print(". at command => ");
+  Serial.print(command);
+  Serial.print(" ");
+  while(countTimeCommand < (maxTime*1))
+  {
+    esp8266.println(command);//at+cipsend
+    if(esp8266.find(readReplay))//ok
+    {
+      found = true;
+      break;
+    }
+  
+    countTimeCommand++;
+  }
+  
+  if(found == true)
+  {
+    Serial.println("OYI");
+    countTrueCommand++;
+    countTimeCommand = 0;
+  }
+  
+  if(found == false)
+  {
+    Serial.println("Fail");
+    countTrueCommand = 0;
+    countTimeCommand = 0;
+  }
+  
+  found = false;
+ }
+
+/****************** MQResistanceCalculation ****************************************
+Input:   raw_adc - raw value read from adc, which represents the voltage
+Output:  the calculated sensor resistance
+Remarks: The sensor and the load resistor forms a voltage divider. Given the voltage
+         across the load resistor and its resistance, the resistance of the sensor
+         could be derived.
+************************************************************************************/ 
+float MQResistanceCalculation(int raw_adc)
+{
+  return ( ((float)RL_VALUE_MQ135*(1023-raw_adc)/raw_adc));
+}
+
+/***************************** MQCalibration ****************************************
+Input:   mq_pin - analog channel
+Output:  Ro of the sensor
+Remarks: This function assumes that the sensor is in clean air. It use  
+         MQResistanceCalculation to calculates the sensor resistance in clean air 
+         and then divides it with RO_CLEAN_AIR_FACTOR. RO_CLEAN_AIR_FACTOR is about 
+         10, which differs slightly between different sensors.
+************************************************************************************/ 
+float MQCalibration(int mq_pin)
+{
+  int i;
+  float RS_AIR_val=0,r0;
+
+  for (i=0;i<CALIBARAION_SAMPLE_TIMES;i++) {                     //take multiple samples
+    RS_AIR_val += MQResistanceCalculation(analogRead(mq_pin));
+    delay(CALIBRATION_SAMPLE_INTERVAL);
+  }
+  RS_AIR_val = RS_AIR_val/CALIBARAION_SAMPLE_TIMES;              //calculate the average value
+
+  r0 = RS_AIR_val/RO_CLEAN_AIR_FACTOR_MQ135;                      //RS_AIR_val divided by RO_CLEAN_AIR_FACTOR yields the Ro 
+                                                                 //according to the chart in the datasheet 
+
+  return r0; 
+}
+
+/*****************************  MQRead *********************************************
+Input:   mq_pin - analog channel
+Output:  Rs of the sensor
+Remarks: This function use MQResistanceCalculation to caculate the sensor resistenc (Rs).
+         The Rs changes as the sensor is in the different consentration of the target
+         gas. The sample times and the time interval between samples could be configured
+         by changing the definition of the macros.
+************************************************************************************/ 
+float MQRead(int mq_pin)
+{
+  int i;
+  float rs=0;
+
+  for (i=0;i<READ_SAMPLE_TIMES;i++) {
+    rs += MQResistanceCalculation(analogRead(mq_pin));
+    delay(READ_SAMPLE_INTERVAL);
+  }
+
+  rs = rs/READ_SAMPLE_TIMES;
+
+  return rs;  
+}
+
+/*****************************  MQGetGasPercentage **********************************
+Input:   rs_ro_ratio - Rs divided by Ro
+         gas_id      - target gas type
+Output:  ppm of the target gas
+Remarks: This function uses different equations representing curves of each gas to 
+         calculate the ppm (parts per million) of the target gas.
+************************************************************************************/ 
+int MQGetGasPercentage(float rs_ro_ratio, int gas_id)
+{ 
+  if ( accuracy == 0 ) {
+  if ( gas_id == GAS_CARBON_DIOXIDE ) {
+    return (pow(10,((-2.890*(log10(rs_ro_ratio))) + 2.055)));
+  } else if ( gas_id == GAS_CARBON_MONOXIDE ) {
+    return (pow(10,((-3.891*(log10(rs_ro_ratio))) + 2.750)));
+  } else if ( gas_id == GAS_ALCOHOL ) {
+    return (pow(10,((-3.181*(log10(rs_ro_ratio))) + 1.895)));
+  } else if ( gas_id == GAS_AMMONIUM ) {
+    return (pow(10,((-2.469*(log10(rs_ro_ratio))) + 2.005)));
+  } else if ( gas_id == GAS_TOLUENE ) {
+    return (pow(10,((-3.479*(log10(rs_ro_ratio))) + 1.658)));
+  } else if ( gas_id == GAS_ACETONE ) {
+    return (pow(10,((-3.452*(log10(rs_ro_ratio))) + 1.542)));
+  }   
+} 
+
+  else if ( accuracy == 1 ) {
+    if ( gas_id == GAS_CARBON_DIOXIDE ) {
+    return (pow(10,((-2.890*(log10(rs_ro_ratio))) + 2.055)));
+  } else if ( gas_id == GAS_CARBON_MONOXIDE ) {
+    return (pow(10,(1.457*pow((log10(rs_ro_ratio)), 2) - 4.725*(log10(rs_ro_ratio)) + 2.855)));
+  } else if ( gas_id == GAS_ALCOHOL ) {
+    return (pow(10,((-3.181*(log10(rs_ro_ratio))) + 1.895)));
+  } else if ( gas_id == GAS_AMMONIUM ) {
+    return (pow(10,((-2.469*(log10(rs_ro_ratio))) + 2.005)));
+  } else if ( gas_id == GAS_TOLUENE ) {
+    return (pow(10,((-3.479*(log10(rs_ro_ratio))) + 1.658)));
+  } else if ( gas_id == GAS_ACETONE ) {
+    return (pow(10,(-1.004*pow((log10(rs_ro_ratio)), 2) - 3.525*(log10(rs_ro_ratio)) + 1.553)));
+  }
+}    
+  return 0;
+}
